@@ -84,16 +84,6 @@
 
 	<div id="gameContainer">
 		<canvas id="unity-canvas" width="1024" height="576" data-pixel-art=""></canvas>
-<script>
-// Unregister any service workers that might intercept our requests
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for (let reg of registrations) {
-            reg.unregister();
-        }
-    });
-}
-</script>
 		<!-- Patch fetch and XHR to redirect StreamingAssets requests to CDN -->
 		<script>
 		(function() {
