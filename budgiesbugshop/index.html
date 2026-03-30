@@ -85,13 +85,14 @@
 	</style>
 	<div id="gameContainer">
 		<canvas id="unity-canvas" width="1024" height="576" data-pixel-art=""></canvas>
+		
 		    <script>
 window.fileMergerConfig = {
     files: [
         { name: 'budgies-bug-shop-demo-web.data.br', parts: 2 },
         { name: 'budgies-bug-shop-demo-web.wasm.br', parts: 3 },
     ],
-    basePath: 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/budgiesbugshop/',
+    basePath: 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/budgiesbugshop/Build/',
     debug: true
 };
     </script>
@@ -101,7 +102,7 @@ window.fileMergerConfig = {
 			var canvas = document.querySelector("#unity-canvas");
 			var config = {
 				dataUrl: "Build/budgies-bug-shop-demo-web.data.br",
-				frameworkUrl: "Build/budgies-bug-shop-demo-web.framework.js.br",
+				frameworkUrl: "Build/budgies-bug-shop-demo-web.framework.js",
 				codeUrl: "Build/budgies-bug-shop-demo-web.wasm.br",
 				streamingAssetsUrl: "StreamingAssets",
 				companyName: "Moon Lagoon",
