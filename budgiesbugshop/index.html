@@ -85,6 +85,17 @@
 	</style>
 	<div id="gameContainer">
 		<canvas id="unity-canvas" width="1024" height="576" data-pixel-art=""></canvas>
+		    <script>
+window.fileMergerConfig = {
+    files: [
+        { name: 'budgies-bug-shop-demo-web.data.br', parts: 2 },
+        { name: 'budgies-bug-shop-demo-web.wasm.br', parts: 3 },
+    ],
+    basePath: 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/budgiesbugshop/',
+    debug: true
+};
+    </script>
+		<script src="https://cdn.jsdelivr.net/gh/bubbls/UGS-Assets@ac5cdfc0042aca584e72619375b4aca948a9243c/merge.js"></script>
 		<script src="Build/budgies-bug-shop-demo-web.loader.js"></script>
 		<script>
 			var canvas = document.querySelector("#unity-canvas");
