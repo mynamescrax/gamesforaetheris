@@ -137,16 +137,16 @@
 		<script src="Build/budgies-bug-shop-demo-web.loader.js"></script>
 		<script>
 			var canvas = document.querySelector("#unity-canvas");
-			var config = {
-				dataUrl: "Build/budgies-bug-shop-demo-web.data.br",
-				frameworkUrl: "Build/budgies-bug-shop-demo-web.framework.js",
-				codeUrl: "Build/budgies-bug-shop-demo-web.wasm.br",
-				streamingAssetsUrl: "StreamingAssets",
-				companyName: "Moon Lagoon",
-				productName: "Budgie's Bug Shop",
-				productVersion: "0.1.0",
-				autoSyncPersistentDataPath: true,
-			};
+var config = {
+    dataUrl: "Build/budgies-bug-shop-demo-web.data.br",
+    frameworkUrl: "Build/budgies-bug-shop-demo-web.framework.js",
+    codeUrl: "Build/budgies-bug-shop-demo-web.wasm.br",
+    streamingAssetsUrl: "https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/budgiesbugshop/StreamingAssets",
+    companyName: "Moon Lagoon",
+    productName: "Budgie's Bug Shop",
+    productVersion: "0.1.0",
+    autoSyncPersistentDataPath: true,
+};
 			var scaleToFit;
 			var unityInstance = null;
 			try {
