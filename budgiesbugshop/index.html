@@ -40,18 +40,7 @@
 			image-rendering: pixelated;
 			-ms-interpolation-mode: nearest-neighbor;
 		}
-	</style>
-</head>
 
-<body>
-	<div id="progressWrapper">
-	    <div id="loadingText">Loading...</div>
-	    <div id="progressContainer">
-	        <div id="progressBar"></div>
-	    </div>
-	</div>
-
-	<style>
 		#progressWrapper {
 		    position: absolute;
 		    bottom: 60px;
@@ -83,19 +72,68 @@
 		    background-color: white;
 		}
 	</style>
+</head>
+
+<body>
+	<div id="progressWrapper">
+	    <div id="loadingText">Loading...</div>
+	    <div id="progressContainer">
+	        <div id="progressBar"></div>
+	    </div>
+	</div>
+
 	<div id="gameContainer">
 		<canvas id="unity-canvas" width="1024" height="576" data-pixel-art=""></canvas>
-		
-		    <script>
-window.fileMergerConfig = {
-    files: [
-        { name: 'budgies-bug-shop-demo-web.data.br', parts: 2 },
-        { name: 'budgies-bug-shop-demo-web.wasm.br', parts: 3 },
-    ],
-    basePath: 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/budgiesbugshop/Build/',
-    debug: true
-};
-    </script>
+
+		<!-- Patch fetch and XHR to redirect StreamingAssets requests to CDN -->
+		<script>
+		(function() {
+		    const CDN_BASE = 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/budgiesbugshop/StreamingAssets/';
+
+		    function patchUrl(url) {
+		        if (typeof url === 'string' && url.includes('StreamingAssets') && !url.startsWith('https://')) {
+		            const filename = url.split('StreamingAssets/')[1];
+		            return CDN_BASE + filename;
+		        }
+		        return url;
+		    }
+
+		    const originalFetch = window.fetch;
+		    window.fetch = async function(input, init) {
+		        if (typeof input === 'string') {
+		            input = patchUrl(input);
+		        } else if (input && input.url) {
+		            const patched = patchUrl(input.url);
+		            if (patched !== input.url) input = new Request(patched, input);
+		        }
+		        return originalFetch(input, init);
+		    };
+
+		    const originalXHR = window.XMLHttpRequest;
+		    function PatchedXHR() {
+		        const xhr = new originalXHR();
+		        const originalOpen = xhr.open.bind(xhr);
+		        xhr.open = function(method, url, ...rest) {
+		            return originalOpen(method, patchUrl(url), ...rest);
+		        };
+		        return xhr;
+		    }
+		    PatchedXHR.prototype = originalXHR.prototype;
+		    window.XMLHttpRequest = PatchedXHR;
+		})();
+		</script>
+
+		<!-- File merger config for split .br files -->
+		<script>
+		window.fileMergerConfig = {
+		    files: [
+		        { name: 'budgies-bug-shop-demo-web.data.br', parts: 2 },
+		        { name: 'budgies-bug-shop-demo-web.wasm.br', parts: 3 },
+		    ],
+		    basePath: 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/budgiesbugshop/Build/',
+		    debug: true
+		};
+		</script>
 		<script src="https://cdn.jsdelivr.net/gh/bubbls/UGS-Assets@ac5cdfc0042aca584e72619375b4aca948a9243c/merge.js"></script>
 		<script src="Build/budgies-bug-shop-demo-web.loader.js"></script>
 		<script>
@@ -151,7 +189,7 @@ window.fileMergerConfig = {
 				window.focus();
 			}
 			createUnityInstance(canvas, config, progressHandler).then(function (instance) {
-			    unityInstance = instance;   // store reference
+			    unityInstance = instance;
 				canvas = instance.Module.canvas;
 				onResize();
 
@@ -162,7 +200,6 @@ window.fileMergerConfig = {
 
 		        document.addEventListener('visibilitychange', function() {
 		        	if (!unityInstance) return;
-			        	
 		            if (document.hidden) {
 		                unityInstance.SendMessage('GameManager', 'OnTabHidden');
 		            } else {
@@ -174,7 +211,6 @@ window.fileMergerConfig = {
 			onResize();
 
 			if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-				// Mobile device style: fill the whole browser client area with the game canvas:
 				const meta = document.createElement('meta');
 				meta.name = 'viewport';
 				meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
