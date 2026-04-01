@@ -7,6 +7,17 @@
     <title>Unity Web Player | Scritchy Scratchy</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
     <link rel="stylesheet" href="TemplateData/style.css">
+        <script>
+        window.fileMergerConfig = {
+            files: [
+                { name: 'WebGL.data.br', parts: 3 },
+                { name: 'WebGL.wasm.br', parts: 3 },
+            ],
+            basePath: 'Build/',
+            debug: true
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/gh/bubbls/UGS-Assets@ac5cdfc0042aca584e72619375b4aca948a9243c/merge.js"></script>
     <style>
       /* Remove all margins and scrollbars */
       body, html { 
