@@ -1,8 +1,3 @@
-/**
- * GMSDK v1 - Game Management & Ads SDK
- * Purpose: License verification, configuration loading, and AdSense/WGPlayer integration.
- */
-
 window['GMSOFT_OPTIONS'] = config;
 const API_BASE_URL = "https://api.1games.io/sdk/gsv1";
 
@@ -29,7 +24,6 @@ function verifyLicenseAndLoad(apiUrl) {
 
         console.log("SDK: Verifying license...");
 
-        // Spoofed license response — skips remote API check
         let response = { regisinfo: { allow_play: 'yes', signed: '' }, moregames_url: {}, adsinfo: { enable: 'no' } };
         let data = response['regisinfo'] || {};
 
