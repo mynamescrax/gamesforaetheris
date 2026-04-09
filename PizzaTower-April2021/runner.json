@@ -1,0 +1,9 @@
+{ "manifestFiles" : [ "game.unx",
+"PizzaTower_GM2.data",
+"PizzaTower_GM2.html",
+"PizzaTower_GM2.js",
+"PizzaTower_GM2.wasm" ], "manifestFilesMD5" : [ "765d5263a0f6e2a0f77677f68d2768ab",
+"01accc4f51b479db1431ca3ab8a5fe4d",
+"b944dc2077877b84532e2c124f6f02a7",
+"4368ae47d76ad78bae375d98331f7299",
+"e9a0ece474a7aa5a31aeaa2379437661" ], "mainJS" : "PizzaTower_GM2.js",  "unx": "game.unx", "index": "index.html", "runner": {"version": "2023.4.0.113", "yyc": true}}
