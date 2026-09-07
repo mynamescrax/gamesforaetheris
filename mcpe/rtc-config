@@ -1,0 +1,1 @@
+{"iceServers":[],"iceTransportPolicy":"relay","relay":{"maxWsBufferedAmount":262144,"maxRelayQueueBytes":524288,"maxRelayQueueAgeMs":1500,"joinSyncGraceMs":100,"joinWarmupMaxPackets":128,"host":{"maxWsBufferedAmount":786432,"maxRelayQueueBytes":2097152,"maxRelayQueueAgeMs":4500,"joinSyncGraceMs":100,"joinWarmupMaxPackets":256}}}
