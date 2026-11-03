@@ -129,6 +129,7 @@
 <script>
 // ?mt=1 loads the threaded module (rexcomp_mt.js, built with build.py web --threads) instead of the cooperative one.
 // It is a separate wasm module, so switching back is just dropping the flag.
+document.write('<scr' + 'ipt src="cdn-retry.js"></scr' + 'ipt>');
 document.write('<scr' + 'ipt src="rexcomp-split.js"></scr' + 'ipt>');
 document.write('<scr' + 'ipt src="gfx-boot.js"></scr' + 'ipt>');
 document.write('<scr' + 'ipt src="rexcomp' + (new URLSearchParams(location.search).has('mt') ? '_mt' : '') + '.js"></scr' + 'ipt>');
