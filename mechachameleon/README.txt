@@ -27,5 +27,5 @@ each file into 1 MB pieces named <path>.<n> under game/) after packing, as this 
 
 Serving this copy from a git host: GitHub refuses any file over 100 MB, so rexcomp.wasm (475 MB) and
 image.bin (183 MB) are stored here as rexcomp.wasm.part01..part40 and image.bin.part01..part16 (12 MiB each),
-and rexcomp-split.js streams the parts back as one response before rexcomp.js asks for either file. Keep the
+and the loader inlined in index.html streams the parts back as one response before rexcomp.js asks for either file. Keep the
 parts next to that script; the rest of the folder is unchanged from the pack.

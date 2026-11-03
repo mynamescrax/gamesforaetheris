@@ -129,15 +129,104 @@
 <script>
 // ?mt=1 loads the threaded module (rexcomp_mt.js, built with build.py web --threads) instead of the cooperative one.
 // It is a separate wasm module, so switching back is just dropping the flag.
-document.write('<scr' + 'ipt src="cdn-retry.js"></scr' + 'ipt>');
-document.write('<scr' + 'ipt src="rexcomp-split.js"></scr' + 'ipt>');
+// jsDelivr answers 403 for a file it has not cached yet when its own GitHub fetch fails: about one request in twenty
+// on this repo, one file at a time, and the next attempt usually succeeds. Without a retry one unlucky 1 MB chunk ends
+// a file read and the game stalls, so retry once, then try the other jsDelivr mirrors and finally raw GitHub. Inlined
+// rather than loaded as a file so a jsDelivr @main cache delay can never leave the page running without it.
+(function () {
+  var RETRY = [403, 429, 500, 502, 503, 504], original = globalThis.fetch.bind(globalThis), tried = new Set();
+  function mirrorsOf(url) {
+    var u; try { u = new URL(url); } catch (e) { return []; }
+    var m = /^\/gh\/([^/]+)\/([^@/]+)@([^/]+)\/(.+)$/.exec(u.pathname);
+    if (!m || !/(^|\.)jsdelivr\.net$/.test(u.host)) return [];
+    var user = m[1], repo = m[2], ref = m[3], rest = m[4];
+    return [
+      'https://gcore.jsdelivr.net/gh/' + user + '/' + repo + '@' + ref + '/' + rest + u.search,
+      'https://fastly.jsdelivr.net/gh/' + user + '/' + repo + '@' + ref + '/' + rest + u.search,
+      'https://raw.githubusercontent.com/' + user + '/' + repo + '/' + ref + '/' + rest,
+    ].filter(function (x) { return !tried.has(x); });
+  }
+  function attempt(url, init) {
+    tried.add(url);
+    return original(url, init).catch(function () { return { ok: false, status: 0 }; });
+  }
+  globalThis.fetch = function (input, init) {
+    var url = input instanceof Request ? input.url : String(input);
+    return attempt(url, init).then(function (res) {
+      if (res.ok || RETRY.indexOf(res.status) < 0) return res;
+      return attempt(url, init).then(function (again) {
+        if (again.ok || RETRY.indexOf(again.status) < 0) return again;
+        var list = mirrorsOf(url);
+        function next(i) {
+          if (i >= list.length) return again;
+          return attempt(list[i], init).then(function (alt) {
+            if (alt.ok) return alt;
+            return RETRY.indexOf(alt.status) < 0 ? again : next(i + 1);
+          });
+        }
+        return next(0);
+      });
+    });
+  };
+}());
+// GitHub refuses files over 100 MB, so the 475 MB runtime wasm and the 183 MB guest image ship as
+// rexcomp.wasm.partNN / image.bin.partNN (12 MiB each). This stitches the parts back into one streamed response before
+// rexcomp.js asks for either file, so the runtime never knows they were split. The counts below are what the folder
+// holds: no probe request past the last part, so no stray 404 in the console (a short read still ends the stream).
+(function () {
+  var SPLIT = {
+    'rexcomp.wasm': { type: 'application/wasm', pad: 2, parts: 40 },
+    'image.bin': { type: 'application/octet-stream', pad: 2, parts: 16 },
+  };
+  var CDN_BASE = 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/mechachameleon/';
+  var query = new URLSearchParams(location.search);
+  var cdn = query.has('cdn') ? query.get('cdn') : CDN_BASE;
+  globalThis.RXC_CDN = cdn ? new URL(cdn.endsWith('/') ? cdn : cdn + '/', location.href).href : '';
+  if (typeof ReadableStream !== 'function' || typeof Response !== 'function') return;
+  var original = globalThis.fetch.bind(globalThis);
+  function target(input) {
+    var url;
+    try { url = new URL(input instanceof Request ? input.url : String(input), document.baseURI); } catch (e) { return null; }
+    var name = Object.keys(SPLIT).filter(function (n) { return url.pathname.endsWith('/' + n); })[0];
+    return name ? { name: name, url: url, cfg: SPLIT[name] } : null;
+  }
+  globalThis.fetch = function (input, init) {
+    var hit = target(input);
+    if (!hit) return original(input, init);
+    var name = hit.name, url = hit.url, cfg = hit.cfg;
+    var local = url.origin + url.pathname.slice(0, -name.length);
+    var stream = new ReadableStream({
+      start: async function (controller) {
+        try {
+          for (var i = 1; i <= cfg.parts; i += 1) {
+            var file = name + '.part' + String(i).padStart(cfg.pad, '0');
+            var part = globalThis.RXC_CDN ? globalThis.RXC_CDN + file : local + file;
+            var res = await original(part, init);
+            if (!res.ok) { if (i === 1) throw new Error('missing ' + file + ' (HTTP ' + res.status + ')'); break; }
+            if (!res.body) { controller.enqueue(new Uint8Array(await res.arrayBuffer())); continue; }
+            var reader = res.body.getReader();
+            for (;;) {
+              var chunk = await reader.read();
+              if (chunk.done) break;
+              controller.enqueue(chunk.value);
+            }
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
+    return Promise.resolve(new Response(stream, { status: 200, statusText: 'OK', headers: { 'content-type': cfg.type } }));
+  };
+}());
 document.write('<scr' + 'ipt src="gfx-boot.js"></scr' + 'ipt>');
 document.write('<scr' + 'ipt src="rexcomp' + (new URLSearchParams(location.search).has('mt') ? '_mt' : '') + '.js"></scr' + 'ipt>');
 </script>
 <script>
 // where the game data (manifest.json + game/) is served from: '' = next to this page, or a CDN base such as
 // 'https://cdn.jsdelivr.net/gh/<user>/<repo>@<tag>/' (build.py pack writes the chunked tree)
-// The 3.1 GB of packed game data sits on the CDN (rexcomp-split.js sets RXC_CDN, ?cdn=<url> overrides it, ?base=<url>
+// The 3.1 GB of packed game data sits on the CDN (the loader above sets RXC_CDN, ?cdn=<url> overrides it, ?base=<url>
 // overrides just the game data). This page and the runtime scripts stay on their own origin because the graphics
 // worker - gfx_worker.js, rexcomp_gfx.js and rexcomp_gfx.wasm - has to be same-origin with the page.
 const GAME_BASE = globalThis.RXC_CDN || '';
