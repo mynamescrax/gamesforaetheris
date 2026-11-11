@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en"><head>
+<base href="https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/ninah/">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>No, I'm not a Human</title>
+<style>
+  :root { color-scheme: dark; --bg: #07080a; --panel: rgba(12, 14, 18, 0.86); --ink: #e8ecf1; --dim: #8b95a3; --accent: #5fbf3f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas { display: block; background: #000; width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); outline: none; image-rendering: auto; grid-area: 1 / 1; }
+  #canvas { background: transparent; }
+  #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(20, 24, 30, 0.75), rgba(0, 0, 0, 0.95)); transition: opacity .4s; }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  /* The direct start has no landing page, but the overlay stays up as the download progress: the runtime is 565 MB and
+     the game data 1.3 GB, so without this the tab is a black rectangle for minutes. */
+  .rxc-direct #overlay { display: grid; }
+  .rxc-direct #overlay h1, .rxc-direct #overlay p, .rxc-direct .resolution, .rxc-direct #play { display: none; }
+  .card { width: min(520px, calc(100vw - 32px)); text-align: center; padding: 28px 24px; }
+  .card h1 { margin: 0 0 6px; font-size: 34px; letter-spacing: .02em; }
+  .card p { margin: 0 0 22px; color: var(--dim); }
+  .resolution { display: block; margin: 0 0 16px; color: var(--dim); }
+  select { font: inherit; color: var(--ink); background: #151820; border: 1px solid #404550; border-radius: 6px; padding: 5px 9px; margin-left: 6px; }
+  #resolution-hud { font-size: 12px; }
+  #play { font: inherit; font-size: 17px; font-weight: 600; color: #111; background: var(--accent); border: 0; border-radius: 10px; padding: 12px 34px; cursor: pointer; }
+  #play:disabled { opacity: .5; cursor: default; }
+  #status { margin-top: 18px; min-height: 1.4em; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #dl { margin-top: 8px; min-height: 1.4em; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #startup-log { display: none; max-height: 180px; overflow: auto; margin: 14px 0 0; padding: 10px; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; background: #050607; border: 1px solid #30343b; border-radius: 6px; color: #b5c0ca; font: 11px/1.4 ui-monospace, monospace; }
+  #startup-log.show { display: block; }
+  #bar { height: 4px; margin-top: 10px; background: rgba(255,255,255,.08); border-radius: 2px; overflow: hidden; }
+  #bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  #bar.indeterminate > div { width: 35% !important; transition: none; animation: loading-sweep 1.4s ease-in-out infinite; }
+  @keyframes loading-sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+  #hud { position: fixed; top: 8px; right: 10px; display: flex; gap: 8px; align-items: center; opacity: .0; transition: opacity .3s; }
+  body:hover #hud, #hud.show { opacity: 1; }
+  #hud button { font: inherit; font-size: 12px; color: var(--ink); background: var(--panel); border: 1px solid rgba(255,255,255,.1); border-radius: 7px; padding: 4px 10px; cursor: pointer; }
+  #fps { font: 12px ui-monospace, monospace; color: var(--dim); background: var(--panel); padding: 4px 8px; border-radius: 7px; display: none; }
+  #log { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; margin: 0; padding: 8px 12px; overflow: auto; white-space: pre-wrap; font: 11px/1.35 ui-monospace, monospace; color: #9aa6b4; background: rgba(5, 6, 8, .92); border-top: 1px solid #222; display: none; }
+  #hint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--dim); background: var(--panel); padding: 5px 12px; border-radius: 8px; opacity: 0; transition: opacity .4s; pointer-events: none; }
+  #locked-cursor { position: fixed; pointer-events: none; z-index: 2; color: white; text-shadow: 0 1px 2px black; }
+  #canvas[style*="cursor: none"] + #locked-cursor { display: none; }
+  #port-credit { position: fixed; right: 10px; bottom: 8px; z-index: 3; color: rgba(255,255,255,.6); font-size: 11px; text-align: right; text-shadow: 0 1px 2px #000; }
+  #port-credit a { color: inherit; }
+  #hint.show { opacity: 1; }
+  #busy { position: fixed; right: 18px; bottom: 18px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: #fff; background: rgba(0,0,0,.55); padding: 8px 14px; border-radius: 10px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #busy.show { opacity: 1; }
+  #busy i { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; will-change: transform; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style></head>
+<body>
+<div id="stage"><canvas id="view" width="1280" height="720"></canvas><canvas id="canvas" width="1280" height="720" tabindex="0"></canvas><span id="locked-cursor" aria-hidden="true" hidden>↖</span></div>
+<div id="hud"><select id="resolution-hud" aria-label="Resolution (restarts game)" title="Resolution (restarts game)"><option value="960x540">540p</option><option value="1280x720">720p</option><option value="1920x1080">1080p</option><option value="2560x1440">1440p</option></select><span id="fps"></span><button id="bsound" title="Sound on/off">Sound: on</button><button id="bfps" title="Frame rate (F8)">FPS</button><button id="bvsync" title="Frame pacing: a steady 60 fps, the screen refresh rate, or uncapped">Frame rate: 60 fps</button><button id="bmouse" title="Capture the mouse for camera control (F10). Esc releases it">Mouse: free</button><button id="blog" title="Engine log (F9)">Log</button><button id="bfull" title="Fullscreen (F11)">Fullscreen</button><button id="bclose" title="Ask before closing this tab">Confirm close: on</button></div>
+<div id="hint">Click the game to capture the mouse</div>
+<div id="port-credit" hidden>port by crax <a href="https://aetheris.win/" target="_blank" rel="noopener">https://aetheris.win/</a> <a href="https://crax.lol" target="_blank" rel="noopener">https://crax.lol</a></div>
+<div id="busy"><i></i><span>Loading…</span></div>
+<pre id="log"></pre>
+<div id="overlay"><div class="card">
+  <h1>No, I'm not a Human</h1>
+  <p>A Windows game, recompiled from machine code to WebAssembly.</p>
+  <label class="resolution">Resolution <select id="resolution"><option value="960x540">540p</option><option value="1280x720">720p</option><option value="1920x1080">1080p</option><option value="2560x1440">1440p</option></select></label>
+  <button id="play">Play</button>
+  <pre id="startup-log" role="log" aria-live="polite"></pre>
+  <p style="margin:10px 0 0;font-size:12px;opacity:.6">Powered by Rexcomp · by NotRexed</p>
+  <div id="status"></div>
+  <div id="bar"><div></div></div>
+  <div id="dl"></div>
+</div></div>
+<script>
+// ?mt=1 loads the threaded module (rexcomp_mt.js, built with build.py web --threads) instead of the cooperative one.
+// It is a separate wasm module, so switching back is just dropping the flag.
+// jsDelivr answers 403 for a file it has not cached yet when its own GitHub fetch fails: about one request in twenty
+// on this repo, one file at a time, and the next attempt usually succeeds. Without a retry one unlucky 1 MB chunk ends
+// a file read and the game stalls, so retry once, then try the other jsDelivr mirrors and finally raw GitHub. Inlined
+// rather than loaded as a file so a jsDelivr @main cache delay can never leave the page running without it.
+(function () {
+  var RETRY = [403, 429, 500, 502, 503, 504], original = globalThis.fetch.bind(globalThis), tried = new Set();
+  function mirrorsOf(url) {
+    var u; try { u = new URL(url); } catch (e) { return []; }
+    var m = /^\/gh\/([^/]+)\/([^@/]+)@([^/]+)\/(.+)$/.exec(u.pathname);
+    if (!m || !/(^|\.)jsdelivr\.net$/.test(u.host)) return [];
+    var user = m[1], repo = m[2], ref = m[3], rest = m[4];
+    return [
+      'https://gcore.jsdelivr.net/gh/' + user + '/' + repo + '@' + ref + '/' + rest + u.search,
+      'https://fastly.jsdelivr.net/gh/' + user + '/' + repo + '@' + ref + '/' + rest + u.search,
+      'https://raw.githubusercontent.com/' + user + '/' + repo + '/' + ref + '/' + rest,
+    ].filter(function (x) { return !tried.has(x); });
+  }
+  function attempt(url, init) {
+    tried.add(url);
+    return original(url, init).catch(function () { return { ok: false, status: 0 }; });
+  }
+  globalThis.fetch = function (input, init) {
+    var url = input instanceof Request ? input.url : String(input);
+    return attempt(url, init).then(function (res) {
+      if (res.ok || RETRY.indexOf(res.status) < 0) return res;
+      return attempt(url, init).then(function (again) {
+        if (again.ok || RETRY.indexOf(again.status) < 0) return again;
+        var list = mirrorsOf(url);
+        function next(i) {
+          if (i >= list.length) return again;
+          return attempt(list[i], init).then(function (alt) {
+            if (alt.ok) return alt;
+            return RETRY.indexOf(alt.status) < 0 ? again : next(i + 1);
+          });
+        }
+        return next(0);
+      });
+    });
+  };
+}());
+// GitHub refuses files over 100 MB, so the 565 MB runtime wasm and the 120 MB guest image ship as
+// rexcomp.wasm.partNN / image.bin.partNN (12 MiB each). This stitches the parts back into one streamed response before
+// rexcomp.js asks for either file, so the runtime never knows they were split. The counts below are what the folder
+// holds: no probe request past the last part, so no stray 404 in the console (a short read still ends the stream).
+(function () {
+  var SPLIT = {
+    'rexcomp.wasm': { type: 'application/wasm', pad: 2, parts: 48, part: 12582912, bytes: 592415423 },
+    'image.bin': { type: 'application/octet-stream', pad: 2, parts: 10, part: 12582912, bytes: 125829120 },
+  };
+  var CDN_BASE = 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/ninah/';
+  var query = new URLSearchParams(location.search);
+  var cdn = query.has('cdn') ? query.get('cdn') : CDN_BASE;
+  globalThis.RXC_CDN = cdn ? new URL(cdn.endsWith('/') ? cdn : cdn + '/', location.href).href : '';
+  // how much of each split file has been streamed: the page shows it while the runtime loads
+  globalThis.RXC_SPLIT = {};
+  for (var key in SPLIT) globalThis.RXC_SPLIT[key] = { loaded: 0, total: SPLIT[key].bytes, part: SPLIT[key].part, parts: 0, partsTotal: SPLIT[key].parts };
+  // the part URLs, so the page can fetch the whole file up front (the runtime asks for all of it at start anyway)
+  globalThis.RXC_SPLIT_PARTS = function (name) {
+    var cfg = SPLIT[name]; if (!cfg) return [];
+    var base = globalThis.RXC_CDN || new URL('.', document.baseURI).href;
+    var out = [];
+    for (var i = 1; i <= cfg.parts; i++) out.push(base + name + '.part' + String(i).padStart(cfg.pad, '0'));
+    return out;
+  };
+  if (typeof ReadableStream !== 'function' || typeof Response !== 'function') return;
+  var original = globalThis.fetch.bind(globalThis);
+  function target(input) {
+    var url;
+    try { url = new URL(input instanceof Request ? input.url : String(input), document.baseURI); } catch (e) { return null; }
+    var name = Object.keys(SPLIT).filter(function (n) { return url.pathname.endsWith('/' + n); })[0];
+    return name ? { name: name, url: url, cfg: SPLIT[name] } : null;
+  }
+  globalThis.fetch = function (input, init) {
+    var hit = target(input);
+    if (!hit) return original(input, init);
+    var name = hit.name, url = hit.url, cfg = hit.cfg;
+    var local = url.origin + url.pathname.slice(0, -name.length);
+    var prog = globalThis.RXC_SPLIT[name];
+    var stream = new ReadableStream({
+      start: async function (controller) {
+        try {
+          for (var i = 1; i <= cfg.parts; i += 1) {
+            var file = name + '.part' + String(i).padStart(cfg.pad, '0');
+            var part = globalThis.RXC_CDN ? globalThis.RXC_CDN + file : local + file;
+            var res = await original(part, init);
+            if (!res.ok) { if (i === 1) throw new Error('missing ' + file + ' (HTTP ' + res.status + ')'); break; }
+            if (!res.body) { var ab = new Uint8Array(await res.arrayBuffer()); controller.enqueue(ab); prog.loaded += ab.length; prog.parts = i; continue; }
+            var reader = res.body.getReader();
+            for (;;) {
+              var chunk = await reader.read();
+              if (chunk.done) break;
+              prog.loaded += chunk.value.length; prog.parts = i;
+              controller.enqueue(chunk.value);
+            }
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
+    return Promise.resolve(new Response(stream, { status: 200, statusText: 'OK', headers: { 'content-type': cfg.type } }));
+  };
+}());
+const rxcMt = new URLSearchParams(location.search).has('mt') ? '_mt' : '';
+document.write('<scr' + 'ipt src="launch.js"></scr' + 'ipt>');
+document.write('<scr' + 'ipt>if (window.REXCOMP_LAUNCH?.env?.REXCOMP_DIRECT_START === "1") document.documentElement.classList.add("rxc-direct");</scr' + 'ipt>');
+document.write('<scr' + 'ipt src="modules' + rxcMt + '.js"></scr' + 'ipt>');
+// gfx-boot.js defines rxcMakeGfxWorker: a classic worker script cannot be cross-origin, and every asset on this page
+// comes from the CDN, so the graphics worker is rebuilt from a blob: URL (see gfx-boot.js).
+document.write('<scr' + 'ipt src="gfx-boot.js"></scr' + 'ipt>');
+document.write('<scr' + 'ipt src="rexcomp' + rxcMt + '.js"></scr' + 'ipt>');
+</script>
+<script>
+// where the game data (manifest.json + game/) is served from: '' = next to this page, or a CDN base such as
+// 'https://cdn.jsdelivr.net/gh/<user>/<repo>@<tag>/' (build.py pack writes the chunked tree)
+// The 1.3 GB of packed game data sits on the CDN (the loader above sets RXC_CDN, ?cdn=<url> overrides it, ?base=<url>
+// overrides just the game data).
+const GAME_BASE = globalThis.RXC_CDN || '';
+const PORT_ENV = {};
+(() => {
+  const $ = id => document.getElementById(id);
+  const canvas = $('canvas'), view = $('view'), statusEl = $('status');
+  const startupLog = $('startup-log'); let startupLogActive = false, startupLogStart = 0, startupPending = '', startupTimer = 0, lastStartupStatus = '';
+  const flushStartupLog = () => {
+    startupTimer = 0;
+    if (!startupPending) return;
+    startupLog.textContent = (startupLog.textContent + startupPending).slice(-24000);
+    startupPending = '';
+    startupLog.scrollTop = startupLog.scrollHeight;
+  };
+  const appendStartupLog = line => {
+    if (!startupLogActive) return;
+    startupPending += '[' + ((performance.now() - startupLogStart) / 1000).toFixed(1) + 's] ' + line.slice(0, 4000) + '\n';
+    if (startupPending.length > 48000) startupPending = startupPending.slice(-24000);
+    if (!startupTimer) startupTimer = setTimeout(flushStartupLog, 100);
+  };
+  for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+    const original = console[level].bind(console);
+    console[level] = (...args) => {
+      appendStartupLog('[' + level + '] ' + args.map(v => v instanceof Error ? v.stack || String(v) : String(v)).join(' '));
+      original(...args);
+    };
+  }
+  addEventListener('error', e => appendStartupLog('[error] ' + (e.message || e.error || e)));
+  addEventListener('unhandledrejection', e => appendStartupLog('[error] ' + (e.reason && e.reason.stack || e.reason)));
+  const status = s => { statusEl.textContent = s; if (s !== lastStartupStatus) { lastStartupStatus = s; appendStartupLog('[status] ' + s); } };
+  const startupError = () => { $('overlay').classList.add('startup-error'); $('overlay').classList.remove('hidden'); };
+  if (!('Suspending' in WebAssembly)) { startupError(); status('This browser lacks WebAssembly JavaScript Promise Integration — use Chrome or Edge 137 or newer.'); $('play').disabled = true; }
+
+  // physical key (KeyboardEvent.code) -> [virtual key, scan code, extended]
+  const K = {};
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach((ch, i) => { K['Key' + ch] = [65 + i, [0x1E,0x30,0x2E,0x20,0x12,0x21,0x22,0x23,0x17,0x24,0x25,0x26,0x32,0x31,0x18,0x19,0x10,0x13,0x1F,0x14,0x16,0x2F,0x11,0x2D,0x15,0x2C][i], 0]; });
+  for (let d = 0; d <= 9; d++) K['Digit' + d] = [48 + d, d === 0 ? 0x0B : d + 1, 0];
+  Object.assign(K, { Escape: [0x1B, 0x01, 0], Minus: [0xBD, 0x0C, 0], Equal: [0xBB, 0x0D, 0], Backspace: [0x08, 0x0E, 0], Tab: [0x09, 0x0F, 0], BracketLeft: [0xDB, 0x1A, 0], BracketRight: [0xDD, 0x1B, 0],
+    Enter: [0x0D, 0x1C, 0], ControlLeft: [0x11, 0x1D, 0], Semicolon: [0xBA, 0x27, 0], Quote: [0xDE, 0x28, 0], Backquote: [0xC0, 0x29, 0], ShiftLeft: [0x10, 0x2A, 0], Backslash: [0xDC, 0x2B, 0],
+    Comma: [0xBC, 0x33, 0], Period: [0xBE, 0x34, 0], Slash: [0xBF, 0x35, 0], ShiftRight: [0x10, 0x36, 0], NumpadMultiply: [0x6A, 0x37, 0], AltLeft: [0x12, 0x38, 0], Space: [0x20, 0x39, 0],
+    CapsLock: [0x14, 0x3A, 0], F1: [0x70, 0x3B, 0], F2: [0x71, 0x3C, 0], F3: [0x72, 0x3D, 0], F4: [0x73, 0x3E, 0], F5: [0x74, 0x3F, 0], F6: [0x75, 0x40, 0], F7: [0x76, 0x41, 0], F10: [0x79, 0x44, 0],
+    F12: [0x7B, 0x58, 0], Numpad7: [0x67, 0x47, 0], Numpad8: [0x68, 0x48, 0], Numpad9: [0x69, 0x49, 0], NumpadSubtract: [0x6D, 0x4A, 0], Numpad4: [0x64, 0x4B, 0], Numpad5: [0x65, 0x4C, 0],
+    Numpad6: [0x66, 0x4D, 0], NumpadAdd: [0x6B, 0x4E, 0], Numpad1: [0x61, 0x4F, 0], Numpad2: [0x62, 0x50, 0], Numpad3: [0x63, 0x51, 0], Numpad0: [0x60, 0x52, 0], NumpadDecimal: [0x6E, 0x53, 0],
+    NumpadEnter: [0x0D, 0x1C, 1], ControlRight: [0x11, 0x1D, 1], AltRight: [0x12, 0x38, 1], ArrowUp: [0x26, 0x48, 1], ArrowLeft: [0x25, 0x4B, 1], ArrowRight: [0x27, 0x4D, 1], ArrowDown: [0x28, 0x50, 1],
+    Insert: [0x2D, 0x52, 1], Delete: [0x2E, 0x53, 1], Home: [0x24, 0x47, 1], End: [0x23, 0x4F, 1], PageUp: [0x21, 0x49, 1], PageDown: [0x22, 0x51, 1] });
+
+  let M = null, started = false, skipClosePrompt = false, confirmClose = true;
+  addEventListener('beforeunload', e => { if (started && confirmClose && !skipClosePrompt) { e.preventDefault(); e.returnValue = ''; } });
+  $('bclose').onclick = () => { confirmClose = !confirmClose; $('bclose').textContent = 'Confirm close: ' + (confirmClose ? 'on' : 'off'); };
+  const q = new URLSearchParams(location.search), launch = window.REXCOMP_LAUNCH || {};
+  const env = Object.assign({}, launch.env || {}); for (const [k, v] of q) if (k.startsWith('REXCOMP_')) env[k] = v;
+  // Browser launch arguments and runtime settings.
+  let res = (() => {
+    let saved = ''; try { saved = localStorage.getItem('rexcomp.resolution') || ''; } catch (_) {}
+    const m = /^(\d+)x(\d+)$/.exec(q.get('res') || saved); if (m && +m[1] >= 320 && +m[1] <= 7680 && +m[2] >= 180 && +m[2] <= 4320) return [+m[1], +m[2]];
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), cssW = Math.min(screen.width, screen.height * 16 / 9);
+    const w = Math.max(1280, Math.round(Math.min(cssW * dpr, +(q.get('maxw') || 1920)) / 16) * 16);
+    return [w, Math.round(w * 9 / 32) * 2];
+  })();
+  const resolutionSelects = [$('resolution'), $('resolution-hud')];
+  const selectedResolution = res.join('x');
+  for (const select of resolutionSelects) {
+    if (![...select.options].some(o => o.value === selectedResolution)) select.add(new Option(selectedResolution, selectedResolution));
+    select.value = selectedResolution;
+    select.onchange = () => {
+      const value = select.value;
+      try { localStorage.setItem('rexcomp.resolution', value); } catch (_) {}
+      q.set('res', value);
+      if (started) { q.set('autostart', '1'); skipClosePrompt = true; location.search = q.toString(); return; }
+      res = value.split('x').map(Number);
+      for (const other of resolutionSelects) other.value = value;
+      history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash);
+    };
+  }
+  const launchArgs = () => {
+    const base = q.has('args') ? q.get('args') : launch.args ?? `-force-d3d11 -screen-fullscreen 0 -popupwindow -screen-width ${res[0]} -screen-height ${res[1]} -disable-gpu-skinning -logFile -`;
+    let a = base.replace(/-screen-width\s+\d+/gi, `-screen-width ${res[0]}`).replace(/-screen-height\s+\d+/gi, `-screen-height ${res[1]}`).replace(/-ResX=\d+/gi, `-ResX=${res[0]}`).replace(/-ResY=\d+/gi, `-ResY=${res[1]}`);
+    if (/(^|\s)-dx11(\s|$)/.test(a) && !/(^|\s)-w\s/.test(a)) a += ` -w ${res[0]} -h ${res[1]}`;
+    return a;
+  };
+
+  const toggle = (el, on) => { el.style.display = (on ?? (el.style.display === 'none' || !el.style.display)) ? 'block' : 'none'; };
+  $('blog').onclick = () => toggle($('log'));
+  $('bfps').onclick = () => { const f = $('fps'); f.style.display = f.style.display === 'inline' ? 'none' : 'inline'; };
+  $('bfull').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); };
+  // mouse capture (pointer lock): relative motion only, as WM_INPUT deltas - the camera. Menus need the free cursor, so it is a toggle
+  $('port-credit').hidden = env.REXCOMP_NINAH_WATERMARK !== '1';
+  const autoCapture = env.REXCOMP_CAPTURE_MOUSE === '1';
+  const grab = () => { if (autoCapture) { canvas.requestPointerLock?.()?.catch(() => {}); return; } if (canvas.requestPointerLock) canvas.requestPointerLock({ unadjustedMovement: true })?.catch(() => { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }); };
+  $('bmouse').onclick = () => { if (document.pointerLockElement === canvas) document.exitPointerLock(); else grab(); };
+  document.addEventListener('pointerlockchange', () => { $('bmouse').textContent = document.pointerLockElement === canvas ? 'Mouse: captured' : 'Mouse: free'; });
+  const PACE = { cap: ['60 fps', 'cap'], vsync: ['Vsync', 'auto'], off: ['Uncapped', 'mc'] }, PACE_ORDER = ['cap', 'vsync', 'off'];
+  let pace = PACE[q.get('pace')] ? q.get('pace') : PACE[localStorage.getItem('rxcPace')] ? localStorage.getItem('rxcPace') : 'cap';
+  const setPace = p => { pace = p; if (window.rexcomp) window.rexcomp.yieldMode = PACE[p][1]; localStorage.setItem('rxcPace', p); $('bvsync').textContent = 'Frame rate: ' + PACE[p][0]; };
+  $('bvsync').onclick = () => setPace(PACE_ORDER[(PACE_ORDER.indexOf(pace) + 1) % PACE_ORDER.length]);
+  setPace(pace);
+  // HUD buttons must never keep keyboard focus: Enter/Space would "click" them instead of reaching the game
+  for (const b of document.querySelectorAll('#hud button')) { b.tabIndex = -1; b.addEventListener('mousedown', e => e.preventDefault()); b.addEventListener('click', () => { b.blur(); canvas.focus(); }); }
+  setInterval(() => { const s = globalThis.__rxcStats; if (s) $('fps').textContent = `${s.fps.toFixed(0)} fps`; }, 500);
+
+  // ---- input -> guest window messages
+  const ev = (name, ...a) => { if (M && M['_' + name]) M['_' + name](...a); };
+  const locked = () => document.pointerLockElement === canvas;
+  const pos = e => { const r = canvas.getBoundingClientRect(), cw = (M && M.canvasW) || canvas.width, ch = (M && M.canvasH) || canvas.height; return [Math.round((e.clientX - r.left) * cw / r.width), Math.round((e.clientY - r.top) * ch / r.height)]; };
+  let mouseX = 0, mouseY = 0;
+  const cursor = $('locked-cursor');
+  const mousePosition = e => {
+    if (!locked()) return pos(e);
+    if (!autoCapture) return [-1, -1];
+    const r = canvas.getBoundingClientRect();
+    return pos({ clientX: r.left + mouseX, clientY: r.top + mouseY });
+  };
+  const showCursor = () => {
+    cursor.hidden = !autoCapture || !locked() || !$('overlay').classList.contains('hidden');
+    const r = canvas.getBoundingClientRect();
+    cursor.style.left = `${r.left + mouseX}px`;
+    cursor.style.top = `${r.top + mouseY}px`;
+  };
+  document.addEventListener('pointerlockchange', showCursor);
+  addEventListener('keydown', e => {
+    if (!started) return;
+    if (e.code === 'F9') { toggle($('log')); e.preventDefault(); return; }
+    if (e.code === 'F8') { $('bfps').onclick(); e.preventDefault(); return; }
+    if (e.code === 'F11') { $('bfull').onclick(); e.preventDefault(); return; }
+    if (e.code === 'F10') { $('bmouse').onclick(); e.preventDefault(); return; }
+    const k = K[e.code]; if (!k) return;
+    ev('rxc_ev_key', 1, k[0], k[1], (e.repeat ? 1 : 0) | (k[2] ? 2 : 0));
+    if (e.key.length === 1 && !e.ctrlKey && !e.altKey) ev('rxc_ev_char', e.key.charCodeAt(0));
+    else if (e.code === 'Enter' || e.code === 'Backspace' || e.code === 'Tab' || e.code === 'Escape') ev('rxc_ev_char', k[0]);
+    e.preventDefault();
+  });
+  addEventListener('keyup', e => { if (!started) return; const k = K[e.code]; if (!k) return; ev('rxc_ev_key', 0, k[0], k[1], k[2] ? 2 : 0); e.preventDefault(); });
+  canvas.addEventListener('mousemove', e => {
+    if (locked()) {
+      if (autoCapture) {
+        const r = canvas.getBoundingClientRect();
+        mouseX = Math.max(0, Math.min(r.width - 1, mouseX + e.movementX));
+        mouseY = Math.max(0, Math.min(r.height - 1, mouseY + e.movementY));
+        ev('rxc_ev_mouse', 4, ...pos({ clientX: r.left + mouseX, clientY: r.top + mouseY }), 0, 0);
+        showCursor();
+      }
+      if ((e.movementX || e.movementY) && (!autoCapture || M?._rxc_raw_mouse_wanted?.())) ev('rxc_ev_mouse_raw', e.movementX, e.movementY);
+    }
+    else {
+      const [x, y] = pos(e); ev('rxc_ev_mouse', 0, x, y, 0, 0);
+      // Windows raw input reports mouse deltas whether or not the cursor is locked: games that read the mouse through
+      // WM_INPUT get them as well as the absolute position
+      if ((e.movementX || e.movementY) && M && M._rxc_raw_mouse_wanted && M._rxc_raw_mouse_wanted()) ev('rxc_ev_mouse_raw', e.movementX, e.movementY);
+    }
+  });
+  canvas.addEventListener('click', e => {
+    if (autoCapture && started && !locked()) {
+      const r = canvas.getBoundingClientRect();
+      mouseX = e.clientX - r.left; mouseY = e.clientY - r.top;
+      grab();
+    }
+  });
+  canvas.addEventListener('mousedown', e => {
+    canvas.focus();
+    const [x, y] = mousePosition(e); ev('rxc_ev_mouse', 1, x, y, e.button, 0); e.preventDefault();
+  });
+  addEventListener('mouseup', e => { if (!started) return; const [x, y] = mousePosition(e); ev('rxc_ev_mouse', 2, x, y, e.button, 0); });
+  canvas.addEventListener('wheel', e => { ev('rxc_ev_mouse', 3, -1, -1, 0, -Math.sign(e.deltaY) * 120); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  addEventListener('focus', () => ev('rxc_ev_focus', 1)); addEventListener('blur', () => ev('rxc_ev_focus', 0));
+  view.addEventListener('webglcontextlost', e => { window.__rxcLost = true; status('The graphics context was lost (GPU reset). Reload the page to continue.'); startupError(); });
+  document.addEventListener('pointerlockchange', () => $('hint').classList.toggle('show', started && !locked()));
+
+  // ---- audio: an AudioWorklet playing the PCM the game's audio device produces (rt/win32/wasapi.c). A small jitter
+  // buffer: playback starts with 80 ms queued and increases that target after an underrun, so late delivery plays in longer pieces instead of
+  // crackling; a gap decays to silence and the stream fades back in (no clicks); a backlog over 350 ms (the game ran
+  // ahead of the device) skips to 150 ms. Every second it reports underruns ({a: stats}: frames of silence, gaps,
+  // frames dropped, queue low/high in frames) - globalThis.__rxcAudio, read by tools/mc2bench.py.
+  const WORKLET = `class RexcompOut extends AudioWorkletProcessor {
+    constructor() { super(); this.q = []; this.off = 0; this.queued = 0; this.play = false; this.began = false; this.gain = 1; this.l = 0; this.r = 0; this.k = 0;
+      this.target = sampleRate * 0.08;
+      this.st = { starve: 0, gaps: 0, drop: 0, qmin: 1e9, qmax: 0 };
+      this.port.onmessage = e => { if (e.data && e.data.reset) { this.q = []; this.off = this.queued = 0; this.play = this.began = false; this.target = sampleRate * 0.08; this.gain = 0; this.l = this.r = 0; return; }
+        this.q.push(e.data); this.queued += e.data.length / 2;
+        if (this.queued > sampleRate * 0.35) { while (this.q.length > 1) { const f = this.q[0].length / 2 - this.off; if (this.queued - f < Math.max(sampleRate * 0.15, this.target)) break; this.q.shift(); this.queued -= f; this.st.drop += f; this.off = 0; } this.gain = 0; } }; }
+    process(inputs, outputs) { const out = outputs[0], L = out[0], R = out[1] || out[0], n = L.length; let i = 0;
+      if (!this.play && this.queued >= this.target) { this.play = true; this.began = true; this.gain = 0; }
+      if (this.play) {
+        while (i < n && this.q.length) { const b = this.q[0], frames = b.length / 2, take = Math.min(n - i, frames - this.off);
+          for (let k = 0; k < take; k++) { const g = this.gain; L[i + k] = b[(this.off + k) * 2] * g; R[i + k] = b[(this.off + k) * 2 + 1] * g; if (g < 1) this.gain = Math.min(1, g + 1 / 128); }
+          i += take; this.off += take; this.queued -= take; if (this.off >= frames) { this.q.shift(); this.off = 0; } }
+        if (i) { this.l = L[i - 1]; this.r = R[i - 1]; }
+        if (i < n) { this.play = false; this.target = Math.min(sampleRate * 0.24, this.target + sampleRate * 0.04); this.st.gaps++; }
+      }
+      if (i < n && this.began) this.st.starve += n - i;
+      for (; i < n; i++) { this.l *= 0.9; this.r *= 0.9; L[i] = this.l; R[i] = this.r; }
+      if (this.queued < this.st.qmin) this.st.qmin = this.queued; if (this.queued > this.st.qmax) this.st.qmax = this.queued;
+      if (++this.k % 375 === 0) { this.st.targetMs = this.target * 1000 / sampleRate; this.port.postMessage({ a: this.st }); this.st = { starve: 0, gaps: 0, drop: 0, qmin: 1e9, qmax: 0 }; }
+      return true; } }
+  registerProcessor('rexcomp-out', RexcompOut);`;
+  async function startAudio(M) {
+    try {
+      const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+      M.audioContext = ctx; M.soundOn = true;
+      const soundLabel = () => { $('bsound').textContent = !M.soundOn ? 'Sound: off' : ctx.state === 'running' ? 'Sound: on' : 'Sound: click to enable'; };
+      ctx.onstatechange = soundLabel; soundLabel();
+      ctx.resume().catch(() => soundLabel());
+      const ensureAudio = () => { if (M.soundOn && ctx.state !== 'running') ctx.resume().catch(soundLabel); };
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) ensureAudio(); });
+      addEventListener('focus', ensureAudio);
+      addEventListener('pointerdown', ensureAudio, true);
+      addEventListener('keydown', ensureAudio, true);
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' })));
+      const node = new AudioWorkletNode(ctx, 'rexcomp-out', { numberOfInputs: 0, outputChannelCount: [2] });
+      node.connect(ctx.destination); M.audioNode = node;
+      const an = ctx.createAnalyser(); an.fftSize = 2048; node.connect(an);
+      window.rxcAudioLevel = async ms => {
+        const buf = new Float32Array(an.fftSize), end = performance.now() + (ms || 3000); let n = 0, sum = 0, peak = 0, loud = 0, polls = 0;
+        while (performance.now() < end) { an.getFloatTimeDomainData(buf); let s = 0; for (const v of buf) { s += v * v; if (Math.abs(v) > peak) peak = Math.abs(v); } sum += s; n += buf.length; polls++; if (Math.sqrt(s / buf.length) > 0.001) loud++; await new Promise(r => setTimeout(r, 40)); }
+        return { state: ctx.state, rms: Math.sqrt(sum / Math.max(1, n)), peak, audibleFraction: loud / Math.max(1, polls), destinationChannels: ctx.destination.channelCount };
+      };
+      // underrun totals since the last read (tools/mc2bench.py reads and resets them)
+      node.port.onmessage = e => { const a = e.data.a, t = globalThis.__rxcAudio || (globalThis.__rxcAudio = { starve: 0, gaps: 0, drop: 0, qmin: 1e9, qmax: 0 });
+        t.starve += a.starve; t.gaps += a.gaps; t.drop += a.drop; t.qmin = Math.min(t.qmin, a.qmin); t.qmax = Math.max(t.qmax, a.qmax); t.targetMs = a.targetMs; };
+      $('bsound').onclick = () => { M.soundOn = !M.soundOn || ctx.state !== 'running'; (M.soundOn ? ctx.resume() : ctx.suspend()).catch(() => {}).finally(soundLabel); soundLabel(); };
+    } catch (e) { console.warn('[audio] unavailable:', e); $('bsound').textContent = 'Sound: n/a'; }
+  }
+
+  // ---- debug: window.rxcDump(glTexture, w, h, isFloat, name) reads a render target back from the graphics worker and POSTs it
+  // as a PNG to the dev server (tools/serve_web.py -> build/<name>/shots/<name>.png). Texture ids come from the pass log
+  // (window.rexcomp.gfxWorker.postMessage({passlog: 1}), lines "-> rt texN").
+  window.rxcProfile = async (ms, name) => {
+    const P = new Profiler({ sampleInterval: 1, maxBufferSize: 200000 });
+    await new Promise(r => setTimeout(r, ms || 5000));
+    const t = await P.stop(), self = new Map(), incl = new Map(), fname = i => { const f = t.frames[i]; return f ? (f.name || '?') + (f.resourceId !== undefined && !f.name ? '@' + f.line : '') : '?'; };
+    let n = 0;
+    for (const s of t.samples) {
+      if (s.stackId === undefined) continue; n++;
+      let st = t.stacks[s.stackId]; const top = fname(st.frameId); self.set(top, (self.get(top) || 0) + 1);
+      const seen = new Set(); while (st) { const nm = fname(st.frameId); if (!seen.has(nm)) { seen.add(nm); incl.set(nm, (incl.get(nm) || 0) + 1); } st = st.parentId !== undefined ? t.stacks[st.parentId] : null; }
+    }
+    const top = (m, k) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([f, c]) => `${(100 * c / n).toFixed(1)}% ${f}`);
+    const out = { samples: n, self: top(self, 80), inclusive: top(incl, 120) };
+    await fetch('/upload/' + (name || 'profile') + '.json', { method: 'POST', body: JSON.stringify(out, null, 1) });
+    return n;
+  };
+  window.rxcDump = (tex, w, h, fl, name) => window.rexcomp.gfxWorker.postMessage({ readtex: [tex, w, h, fl ? 1 : 0, name || ('tex' + tex)] });
+  function rxcImage(im) {
+    const c = new OffscreenCanvas(im.w, im.h); c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(im.data.buffer), im.w, im.h), 0, 0);
+    c.convertToBlob({ type: 'image/png' }).then(b => fetch('/upload/' + im.name + '.png', { method: 'POST', body: b })).then(() => console.log('[dump] uploaded ' + im.name));
+  }
+
+  const PROG_KEY = 'rxcPrograms';
+  const loadLearned = () => { try { const a = JSON.parse(localStorage.getItem(PROG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } };
+  const saveLearned = () => {
+    const cur = globalThis.__rxcPrograms; if (!cur || !cur.length) return;
+    try { const all = new Set(loadLearned()); for (const k of cur) all.add(k); localStorage.setItem(PROG_KEY, JSON.stringify([...all].slice(-8000))); } catch (e) {}
+  };
+
+  // ---- start
+  const bar = $('bar').firstElementChild;
+  let gameDataComplete = false;
+  const gameBase = () => { const b = q.get('base') || GAME_BASE; return b && !b.endsWith('/') ? b + '/' : b; };
+  // ---- download everything before the guest starts
+  // The runtime reads the game's files from game/ one 1 MB chunk at a time, on demand, so a scene that opens a file
+  // nobody has read yet waits for the network. Fetch the whole tree here instead: the runtime's own reads then hit
+  // the browser cache and the guest never stalls on a chunk. ?prefetch=0 turns it off (the runtime fetches on demand
+  // again), ?concurrency=N sets how many requests run at once.
+  const DL = { loaded: 0, total: 0, t0: 0, speed: 0 };
+  const mb = b => (b / 1048576).toFixed(1);
+  const dlShow = label => {
+    const pct = DL.total ? Math.min(100, 100 * DL.loaded / DL.total) : 0;
+    bar.parentElement.classList.remove('indeterminate');
+    bar.style.width = pct.toFixed(1) + '%';
+    const secs = (performance.now() - DL.t0) / 1000;
+    DL.speed = secs > 0.5 ? DL.loaded / secs : 0;
+    const left = DL.speed > 0 ? (DL.total - DL.loaded) / DL.speed : 0;
+    status(label + ' · ' + pct.toFixed(0) + '%  (' + mb(DL.loaded) + ' / ' + mb(DL.total) + ' MB)');
+    $('dl').textContent = (DL.speed > 0 ? mb(DL.speed) + ' MB/s' : 'measuring…') +
+      (left > 1 && pct < 100 ? '  ·  about ' + (left > 90 ? Math.round(left / 60) + ' min left' : Math.ceil(left) + ' s left') : '');
+  };
+  const prefetchEverything = async () => {
+    const base = gameBase(), list = [];
+    // the runtime and the guest image are fetched whole at start: get them first, they are the long pole
+    if (globalThis.RXC_SPLIT_PARTS) {
+      for (const name of ['rexcomp.wasm', 'image.bin']) {
+        const cfg = (globalThis.RXC_SPLIT || {})[name] || {}, step = cfg.part || 0;
+        globalThis.RXC_SPLIT_PARTS(name).forEach((u, i) => list.push({ u: u, b: Math.max(0, Math.min(step, (cfg.total || 0) - i * step)) }));
+      }
+    }
+    // then the game's own files, one chunk each (the same URLs the runtime asks for, so the cache is shared)
+    const m = await (await fetch(base + 'manifest.json', { cache: 'no-cache' })).json();
+    if (m.files && m.chunk) {
+      const chunk = m.chunk, vers = m.vers || null;
+      // ?skip=artbook leaves the 195 MB artbook PDF out (the game never reads it)
+      const skip = (q.get('skip') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      for (const [rel, size] of Object.entries(m.files)) {
+        if (skip.some(s => rel.toLowerCase().includes(s))) continue;
+        const path = rel.split('\\').map(encodeURIComponent).join('/');
+        const v = vers && vers[rel] ? '?v=' + vers[rel] : '';
+        const n = Math.ceil(size / chunk);
+        for (let i = 0; i < n; i++) list.push({ u: base + 'game/' + path + '.' + i + v, b: Math.min(chunk, size - i * chunk) });
+      }
+    }
+    DL.total = list.reduce((a, x) => a + x.b, 0);
+    DL.t0 = performance.now();
+    let idx = 0, done = 0;
+    const workers = Math.max(1, Math.min(24, +(q.get('concurrency') || 12)));
+    const take = async () => {
+      for (;;) {
+        const i = idx++;
+        if (i >= list.length) return;
+        const item = list[i];
+        for (let a = 0; ; a++) {
+          try {
+            const res = await fetch(item.u, { cache: 'default' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const buf = await res.arrayBuffer();
+            DL.loaded += buf.byteLength; done++;
+            break;
+          } catch (err) {
+            if (a >= 4) throw new Error(item.u + ': ' + (err && err.message || err));
+            await new Promise(r => setTimeout(r, 500 * (a + 1)));
+          }
+        }
+        if ((done & 3) === 0 || done === list.length) dlShow('Downloading');
+      }
+    };
+    await Promise.all(Array.from({ length: workers }, take));
+  };
+  $('play').onclick = async () => {
+    if (started) return; started = true;
+    if (autoCapture && navigator.userActivation?.isActive) {
+      const r = canvas.getBoundingClientRect();
+      mouseX = r.width / 2; mouseY = r.height / 2;
+      grab();
+    }
+    startupLogStart = performance.now(); startupLogActive = true; startupLog.classList.add('show'); startupLog.textContent = '[0.0s] Starting…\n';
+    $('play').disabled = true; status('Preparing…'); bar.parentElement.classList.add('indeterminate');
+    // everything is on disk (in the browser cache) before the guest starts, so no scene waits on the network
+    if (q.get('prefetch') !== '0') {
+      try {
+        await prefetchEverything();
+      } catch (e) {
+        console.error('[web] prefetch failed:', e);
+        status('Download failed (' + (e && e.message || e) + ') - continuing, the game fetches what is missing');
+        $('dl').textContent = '';
+      }
+    }
+    status('Starting game…'); bar.parentElement.classList.add('indeterminate');
+    const t0 = performance.now();
+    M = {
+      canvas: view, arguments: [launchArgs()], yieldMode: PACE[pace][1], fpsCap: +(q.get('fps') || 60),
+      // ?mt=N: N guest threads get a host thread of their own (0 = the threaded module, still cooperative)
+      gameBase: q.get('base') || GAME_BASE,
+      dynamicLibraries: window.REXCOMP_SIDE_MODULES || [],
+      preRun: [m => { m.ENV.REXCOMP_MT = q.get('mt') || '0'; m.ENV.REXCOMP_SCREEN = res.join('x'); Object.assign(m.ENV, PORT_ENV); for (const k in env) m.ENV[k] = env[k]; }],   // debug switches, e.g. ?REXCOMP_INPUT=...
+      print: s => { console.log(s); if (globalThis.__rxcSink) globalThis.__rxcSink.push(s); },
+      printErr: s => { console.error(s); if (globalThis.__rxcSink) globalThis.__rxcSink.push(s); },
+      onDownloadProgress: (loaded, total) => {
+        // the guest image (image.bin) is streamed into the guest's memory at start
+        gameDataComplete = loaded === total;
+        bar.parentElement.classList.remove('indeterminate');
+        bar.style.width = (100 * loaded / total).toFixed(1) + '%';
+        status(`Guest image ${Math.floor(100 * loaded / total)}%  (${mb(loaded)} / ${mb(total)} MB)`);
+        $('dl').textContent = '';
+      },
+      onStatus: s => {
+        if (gameDataComplete && /^starting/i.test(s)) { status('Guest image ready · starting the game…'); return; }
+        status(s);
+      },
+      onFirstFrame: () => { flushStartupLog(); startupLogActive = false; bar.parentElement.classList.remove('indeterminate'); bar.style.width = '100%'; $('dl').textContent = ''; $('overlay').classList.add('hidden'); showCursor(); $('hint').classList.add('show'); setTimeout(() => $('hint').classList.remove('show'), 5000); canvas.focus(); },
+    };
+    const useWorker = q.get('gfxworker') !== '0' && !!view.transferControlToOffscreen;
+    window.rexcomp = M;
+    // graphics on a worker thread: the canvas is handed to rt/gfxworker (OffscreenCanvas) and the engine thread only
+    // records commands (rt/web/gfx_remote.c). ?gfxworker=0 keeps WebGL on the engine thread.
+    if (useWorker) {
+      try {
+        // A classic worker script cannot be cross-origin, and the canvas must only be handed over once the worker
+        // exists: transferring it first would leave a canvas nobody draws to if the worker could not be created, which
+        // is exactly what a page whose assets come from a CDN would hit (WebGL then stays on the engine thread).
+        // gfx-boot.js builds the worker: the plain file when it is same-origin, and a blob: URL rebuilt from it when
+        // the page is served from a CDN. The canvas is transferred only once the worker exists, so a failure here
+        // leaves the engine-thread path a canvas it can actually draw to.
+        const w = await rxcMakeGfxWorker(), off = view.transferControlToOffscreen(), wenv = {};
+        for (const k in env) if (!['REXCOMP_INPUT', 'REXCOMP_EXIT_AT', 'REXCOMP_SHOT'].includes(k)) wenv[k] = env[k];
+        M.__gfxEarly = [];
+        w.onmessage = e => { if (e.data.img) return rxcImage(e.data.img); M.__gfxmsg ? M.__gfxmsg(e.data) : M.__gfxEarly.push(e.data); };
+        w.onerror = e => { console.error('[gfx worker] ' + (e.message || e)); status('The graphics worker failed to start: ' + (e.message || e)); };
+        const noprelink = M.prelinkShaders === false || q.has('noprelink');
+        w.postMessage({ init: true, canvas: off, env: wenv, noprelink, learned: noprelink ? [] : loadLearned() }, [off]);
+        setInterval(saveLearned, 15000); addEventListener('pagehide', saveLearned);
+        M.gfxWorker = w;
+      } catch (e) { console.warn('[web] graphics worker unavailable, WebGL stays on the engine thread:', e); }
+    }
+    // the engine loads levels synchronously (no frames for many seconds): show a spinner whenever frames stop for 1.5 s
+    setInterval(() => { const t = M.__lastPresent; $('busy').classList.toggle('show', !!t && performance.now() - t > 1500); }, 250);
+    if (q.has('logsink')) {
+      globalThis.__rxcSink = [];
+      fetch('/log?start=1', { method: 'POST', body: '' });
+      setInterval(() => { const b = globalThis.__rxcSink; if (!b.length) return; globalThis.__rxcSink = []; fetch('/log', { method: 'POST', body: b.join('\n') + '\n' }); }, 1000);
+      let dumped = 0;
+      setInterval(() => { const t = M.__lastPresent; if (t && performance.now() - t > 12000 && performance.now() - dumped > 60000 && M._rxc_dbg_thrdump) { dumped = performance.now(); M._rxc_dbg_thrdump(); } }, 2000);
+    }
+    await startAudio(M);                   // inside the click: user activation lets the AudioContext start
+    Promise.resolve().then(() => Rexcomp(M)).catch(e => {
+      startupError();
+      let what = String(e);
+      if (e instanceof WebAssembly.Exception && M.getExceptionMessage) { try { what = 'C++ exception ' + M.getExceptionMessage(e).filter(Boolean).join(': '); } catch (_) {} }
+      status('Failed to start: ' + what); console.error('[rexcomp] ' + what + (e && e.stack ? '\n' + e.stack : ''));
+      if (globalThis.__rxcSink) globalThis.__rxcSink.push('[web] main thread crashed: ' + (e && e.stack ? e.stack : e));
+    });
+    // the page stays interactive while main() runs on its own JSPI stack; clicking the canvas captures the mouse
+    canvas.focus();
+  };
+  if ('Suspending' in WebAssembly && (q.has('autostart') || document.documentElement.classList.contains('rxc-direct'))) $('play').onclick();
+})();
+</script>
+</body></html>

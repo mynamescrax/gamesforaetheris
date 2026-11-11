@@ -1,0 +1,19 @@
+{
+    "name": "Game - WebAssembly Port",
+    "short_name": "Game",
+    "description": "A fully functional game port compiled to WebAssembly.",
+    "start_url": "./",
+    "display": "standalone",
+    "display_override": ["fullscreen", "standalone", "minimal-ui", "browser"],
+    "orientation": "landscape",
+    "background_color": "#000000",
+    "theme_color": "#000000",
+    "icons": [
+        {
+            "src": "icon.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}
