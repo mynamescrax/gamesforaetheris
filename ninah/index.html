@@ -111,6 +111,71 @@
 // ?mt=1 loads the threaded module (rexcomp_mt.js, built with build.py web --threads) instead of the cooperative one.
 // It is a separate wasm module, so switching back is just dropping the flag.
 const rxcMt = new URLSearchParams(location.search).has('mt') ? '_mt' : '';
+// GitHub refuses files over 100 MB, so the 565 MB runtime wasm and the 120 MB guest image ship as
+// rexcomp.wasm.partNN / image.bin.partNN (12 MiB each). This stitches the parts back into one streamed response
+// before rexcomp.js asks for either file, so the runtime never knows they were split.
+(function () {
+  var SPLIT = {
+    'rexcomp.wasm': { type: 'application/wasm', pad: 2, parts: 48, part: 12582912 },
+    'image.bin': { type: 'application/octet-stream', pad: 2, parts: 10, part: 12582912 },
+  };
+  if (typeof ReadableStream !== 'function' || typeof Response !== 'function') return;
+  var original = globalThis.fetch.bind(globalThis);
+  function target(input) {
+    var url;
+    try { url = new URL(input instanceof Request ? input.url : String(input), document.baseURI); } catch (e) { return null; }
+    var name = Object.keys(SPLIT).filter(function (n) { return url.pathname.endsWith('/' + n); })[0];
+    return name ? { name: name, url: url, cfg: SPLIT[name] } : null;
+  }
+  globalThis.fetch = function (input, init) {
+    var hit = target(input);
+    if (!hit) return original(input, init);
+    var name = hit.name, url = hit.url, cfg = hit.cfg;
+    var local = url.origin + url.pathname.slice(0, -name.length);
+    var stream = new ReadableStream({
+      start: async function (controller) {
+        try {
+          for (var i = 1; i <= cfg.parts; i += 1) {
+            var file = name + '.part' + String(i).padStart(cfg.pad, '0');
+            var res = await original(local + file, init);
+            if (!res.ok) { if (i === 1) throw new Error('missing ' + file + ' (HTTP ' + res.status + ')'); break; }
+            if (!res.body) { controller.enqueue(new Uint8Array(await res.arrayBuffer())); continue; }
+            var reader = res.body.getReader();
+            for (;;) {
+              var chunk = await reader.read();
+              if (chunk.done) break;
+              controller.enqueue(chunk.value);
+            }
+          }
+          controller.close();
+        } catch (err) { controller.error(err); }
+      },
+    });
+    return Promise.resolve(new Response(stream, { status: 200, statusText: 'OK', headers: { 'content-type': cfg.type } }));
+  };
+}());
+// gfx_worker.js is a classic worker and has to be same-origin with the page: keep the plain file when it is, and
+// otherwise rebuild it from the CDN source with absolute URLs and start it from a blob: URL.
+(() => {
+  const workerUrl = () => new URL('gfx_worker.js', document.baseURI);
+  const abs = path => new URL(path, workerUrl()).href;
+  globalThis.rxcMakeGfxWorker = async function () {
+    const url = workerUrl();
+    if (url.origin === location.origin) return new Worker(url.href);
+    const res = await fetch(url.href);
+    if (!res.ok) throw new Error('cannot load gfx_worker.js (HTTP ' + res.status + ')');
+    let src = await res.text();
+    const rewrite = (from, to) => {
+      if (!src.includes(from)) throw new Error('gfx_worker.js no longer contains ' + from);
+      src = src.split(from).join(to);
+    };
+    rewrite("importScripts('rexcomp_gfx.js')", "importScripts('" + abs('rexcomp_gfx.js') + "')");
+    rewrite("importScripts('shadow_store.js')", "importScripts('" + abs('shadow_store.js') + "')");
+    rewrite("fetch('programs.json')", "fetch('" + abs('programs.json') + "')");
+    rewrite('G = await RexcompGfx({', "G = await RexcompGfx({ locateFile: p => new URL(p, '" + workerUrl().href + "').href,");
+    return new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  };
+})();
 document.write('<scr' + 'ipt src="launch.js"></scr' + 'ipt>');
 document.write('<scr' + 'ipt>if (window.REXCOMP_LAUNCH?.env?.REXCOMP_DIRECT_START === "1") document.documentElement.classList.add("rxc-direct");</scr' + 'ipt>');
 document.write('<scr' + 'ipt src="modules' + rxcMt + '.js"></scr' + 'ipt>');
@@ -412,7 +477,7 @@ const PORT_ENV = {};
     // records commands (rt/web/gfx_remote.c). ?gfxworker=0 keeps WebGL on the engine thread.
     if (useWorker) {
       try {
-        const off = view.transferControlToOffscreen(), w = new Worker('gfx_worker.js'), wenv = {};
+        const w = await rxcMakeGfxWorker(), off = view.transferControlToOffscreen(), wenv = {};
         for (const k in env) if (!['REXCOMP_INPUT', 'REXCOMP_EXIT_AT', 'REXCOMP_SHOT'].includes(k)) wenv[k] = env[k];
         M.__gfxEarly = [];
         w.onmessage = e => { if (e.data.img) return rxcImage(e.data.img); M.__gfxmsg ? M.__gfxmsg(e.data) : M.__gfxEarly.push(e.data); };
