@@ -27,17 +27,17 @@ The page fetches everything before the game starts and shows it: the runtime (56
 the percentage, the megabytes, the speed and the time left; the overlay goes away on the first frame.
 
 The runtime reads the game's files on demand, one chunk at a time, so without this a scene that opens a file
-nobody has read yet waits for the network. The page fetches the same URLs the runtime asks for, so the
-runtime's own reads are cache hits.
+nobody has read yet waits for the network. The page asks for the same URLs the runtime asks for and keeps them
+in Cache Storage (not in the browser's HTTP cache - that is not a dependable place for 1.3 GB), and the runtime's
+own reads are answered out of it. So every chunk is downloaded exactly once, and a second visit starts without
+downloading anything again.
 
   ?prefetch=0      do not prefetch: the runtime fetches on demand again (a slow first boot, no stall after)
-  ?concurrency=N   how many requests run at once (default 12)
+  ?concurrency=N   how many requests run at once (default 24 - jsDelivr answers in about 400 ms, so the
+                   download is latency-bound and many requests at once is what makes it fast)
   ?skip=artbook    leave the 195 MB artbook PDF out - the game never reads it
   ?cdn=<url>       where the parts, the runtime and the game data come from
   ?base=<url>      only the game data from somewhere else
-
-A second visit is served from the browser cache, so it starts almost at once - as long as the cache still
-holds the files.
 
 Controls
 --------

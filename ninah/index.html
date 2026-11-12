@@ -109,13 +109,53 @@
     });
   };
 }());
+// The game's files live in Cache Storage, not in the browser's HTTP cache. The HTTP cache is not a dependable place
+// for 1.3 GB (it is sized as a fraction of the free disk, it evicts, and some setups have it off), and the prefetch
+// below would then be thrown away: the runtime would download every chunk a second time. Cache Storage has a quota
+// of its own (10 GB here), keeps what it is given, and this interceptor answers the runtime's reads out of it - so
+// the prefetch is downloaded exactly once and the guest never waits for a chunk.
+// The writes are batched by the prefetch (putAll): one put() per chunk means one flush per chunk, and 1500 of them
+// take longer than the download itself.
+(function () {
+  if (!('caches' in window) || !window.caches) return;
+  var CACHE = 'rxc-game-v1', opened = null, warned = false;
+  function cache() {
+    if (!opened) opened = caches.open(CACHE).catch(function (e) { opened = null; throw e; });
+    return opened;
+  }
+  globalThis.RXC_GAME_CACHE = {
+    name: CACHE,
+    open: cache,
+    // keep a chunk: one put() is about 2 ms, but 1500 of them at once pile up and slow the download down
+    async put(url, buf) {
+      var c = await cache();
+      await c.put(url, new Response(buf, { headers: { 'content-type': 'application/octet-stream' } }));
+    }
+  };
+  // the game's chunks (<base>game/<path>.<n>) and the parts of the runtime and the guest image (<name>.partNN)
+  var KEEP = /\/game\/.+\.\d+$|\.part\d+$/;
+  var original = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = function (input, init) {
+    var url;
+    try { url = new URL(input instanceof Request ? input.url : String(input), document.baseURI); } catch (e) { return original(input, init); }
+    if (!KEEP.test(url.pathname)) return original(input, init);
+    var key = url.href;
+    return cache().then(function (c) {
+      return c.match(key).then(function (hit) {
+        if (hit) { hit.__rxcCached = true; return hit; }
+        return original(input, init);
+      });
+    }).catch(function () { return original(input, init); });
+  };
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {}); } catch (e) {}
+}());
 // GitHub refuses files over 100 MB, so the 565 MB runtime wasm and the 120 MB guest image ship as
 // rexcomp.wasm.partNN / image.bin.partNN (12 MiB each). This stitches the parts back into one streamed response before
 // rexcomp.js asks for either file, so the runtime never knows they were split. The counts below are what the folder
 // holds: no probe request past the last part, so no stray 404 in the console (a short read still ends the stream).
 (function () {
   var SPLIT = {
-    'rexcomp.wasm': { type: 'application/wasm', pad: 2, parts: 48, part: 12582912, bytes: 592415423 },
+    'rexcomp.wasm': { type: 'application/wasm', pad: 2, parts: 48, part: 12582912, bytes: 592415998 },
     'image.bin': { type: 'application/octet-stream', pad: 2, parts: 10, part: 12582912, bytes: 125829120 },
   };
   var CDN_BASE = 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/ninah/';
@@ -488,7 +528,9 @@ const PORT_ENV = {};
     DL.total = list.reduce((a, x) => a + x.b, 0);
     DL.t0 = performance.now();
     let idx = 0, done = 0;
-    const workers = Math.max(1, Math.min(24, +(q.get('concurrency') || 12)));
+    // jsDelivr answers in about 400 ms, so the download is latency-bound: many requests at once is what makes it fast
+    const workers = Math.max(1, Math.min(32, +(q.get('concurrency') || 24)));
+    const store = globalThis.RXC_GAME_CACHE;
     const take = async () => {
       for (;;) {
         const i = idx++;
@@ -500,6 +542,10 @@ const PORT_ENV = {};
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const buf = await res.arrayBuffer();
             DL.loaded += buf.byteLength; done++;
+            // keep it: the runtime reads the same URL again and gets it from here instead of the network
+            if (store && !res.__rxcCached) {
+              try { await store.put(item.u, buf); } catch (e) { console.warn('[web] could not keep a chunk in Cache Storage:', e); }
+            }
             break;
           } catch (err) {
             if (a >= 4) throw new Error(item.u + ': ' + (err && err.message || err));
@@ -524,13 +570,14 @@ const PORT_ENV = {};
     if (q.get('prefetch') !== '0') {
       try {
         await prefetchEverything();
+        status('Downloaded · loading the game…');
       } catch (e) {
         console.error('[web] prefetch failed:', e);
         status('Download failed (' + (e && e.message || e) + ') - continuing, the game fetches what is missing');
         $('dl').textContent = '';
       }
     }
-    status('Starting game…'); bar.parentElement.classList.add('indeterminate');
+    status('Starting the game…'); bar.parentElement.classList.add('indeterminate');
     const t0 = performance.now();
     M = {
       canvas: view, arguments: [launchArgs()], yieldMode: PACE[pace][1], fpsCap: +(q.get('fps') || 60),
