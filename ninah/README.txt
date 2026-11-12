@@ -60,6 +60,10 @@ unchanged from the pack.
 
 The page itself is a single file: index.html sets a base href to jsDelivr, so the runtime, the graphics worker
 and the 1.3 GB of game data are all fetched from
-https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/ninah/ - ?cdn=<url> points it somewhere else
-and ?base=<url> only moves the game data. The graphics worker has to be same-origin with the page, so gfx-boot.js
-rebuilds it from a blob: URL when the page is served from a CDN.
+https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@ee33bdbef7b0b482931212a7c7d330f0d7e7c7c0/ninah/
+- ?cdn=<url> points it somewhere else and ?base=<url> only moves the game data. The base is pinned to a commit,
+not @main: jsDelivr's branch resolution kept serving the old split parts after this repo's history was reset, and
+a stale part01..47 mixed with a new part48 is a corrupt wasm. When you repack, bump the commit in both the base
+href and the CDN_BASE in the split loader below (the commit holds every file the page reads). The graphics worker
+has to be same-origin with the page, so gfx-boot.js rebuilds it from a blob: URL when the page is served from a
+CDN.

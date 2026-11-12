@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head>
-<base href="https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/ninah/">
+<base href="https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@ee33bdbef7b0b482931212a7c7d330f0d7e7c7c0/ninah/">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>No, I'm not a Human</title>
 <style>
@@ -72,7 +72,7 @@
 // jsDelivr answers 403 for a file it has not cached yet when its own GitHub fetch fails: about one request in twenty
 // on this repo, one file at a time, and the next attempt usually succeeds. Without a retry one unlucky 1 MB chunk ends
 // a file read and the game stalls, so retry once, then try the other jsDelivr mirrors and finally raw GitHub. Inlined
-// rather than loaded as a file so a jsDelivr @main cache delay can never leave the page running without it.
+// rather than loaded as a file so a jsDelivr cache delay can never leave the page running without it.
 (function () {
   var RETRY = [403, 429, 500, 502, 503, 504], original = globalThis.fetch.bind(globalThis), tried = new Set();
   function mirrorsOf(url) {
@@ -158,7 +158,7 @@
     'rexcomp.wasm': { type: 'application/wasm', pad: 2, parts: 48, part: 12582912, bytes: 592415998 },
     'image.bin': { type: 'application/octet-stream', pad: 2, parts: 10, part: 12582912, bytes: 125829120 },
   };
-  var CDN_BASE = 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@main/ninah/';
+  var CDN_BASE = 'https://cdn.jsdelivr.net/gh/mynamescrax/gamesforaetheris@ee33bdbef7b0b482931212a7c7d330f0d7e7c7c0/ninah/';
   var query = new URLSearchParams(location.search);
   var cdn = query.has('cdn') ? query.get('cdn') : CDN_BASE;
   globalThis.RXC_CDN = cdn ? new URL(cdn.endsWith('/') ? cdn : cdn + '/', location.href).href : '';
