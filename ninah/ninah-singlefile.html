@@ -17,7 +17,7 @@ document.head.append(assetBase);
   #canvas { background: transparent; }
   #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(20, 24, 30, 0.75), rgba(0, 0, 0, 0.95)); transition: opacity .4s; }
   #overlay.hidden { opacity: 0; pointer-events: none; }
-  .rxc-direct #overlay { display: none; }
+  .rxc-direct #overlay .resolution, .rxc-direct #overlay:not(.startup-error) #play { display: none; }
   .card { width: min(520px, calc(100vw - 32px)); text-align: center; padding: 28px 24px; }
   .card h1 { margin: 0 0 6px; font-size: 34px; letter-spacing: .02em; }
   .card p { margin: 0 0 22px; color: var(--dim); }
@@ -29,6 +29,7 @@ document.head.append(assetBase);
   #status { margin-top: 18px; min-height: 1.4em; color: var(--dim); font-variant-numeric: tabular-nums; }
   #startup-log { display: none; max-height: 180px; overflow: auto; margin: 14px 0 0; padding: 10px; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; background: #050607; border: 1px solid #30343b; border-radius: 6px; color: #b5c0ca; font: 11px/1.4 ui-monospace, monospace; }
   #startup-log.show { display: block; }
+  #elapsed { order: 4; flex-basis: 100%; color: var(--dim); font-variant-numeric: tabular-nums; }
   #bar { height: 4px; margin-top: 10px; background: rgba(255,255,255,.08); border-radius: 2px; overflow: hidden; }
   #bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   #bar.indeterminate > div { width: 35% !important; transition: none; animation: loading-sweep 1.4s ease-in-out infinite; }
@@ -105,11 +106,12 @@ document.head.append(assetBase);
 <div id="busy"><i></i><span>Loading…</span></div>
 <pre id="log"></pre>
 <div id="overlay"><div class="rx-frame"></div><div class="card">
-  <h1>Rexcomp</h1>
+  <h1>No, I'm not a Human</h1>
   <label class="resolution">Resolution <select id="resolution"><option value="960x540">540p</option><option value="1280x720">720p</option><option value="1920x1080">1080p</option><option value="2560x1440">1440p</option></select></label>
   <button id="play">Play</button>
   <pre id="startup-log" role="log" aria-live="polite"></pre>
-  <div id="status"></div>
+  <div id="status" role="status">Preparing download…</div>
+  <div id="elapsed"></div>
   <div id="bar"><div></div></div>
 </div></div>
 <script>
@@ -153,15 +155,89 @@ document.head.append(assetBase);
 }());
 (function () {
   var SPLIT = {
-    'rexcomp.wasm': { type: 'application/wasm', pad: 2, parts: 47 },
-    'image.bin': { type: 'application/octet-stream', pad: 2, parts: 10 },
+    'rexcomp.wasm': { type: 'application/wasm', pad: 2, size: 579928986, parts: 47 },
+    'image.bin': { type: 'application/octet-stream', pad: 2, size: 125829120, parts: 10 },
   };
   var CDN_BASE = document.baseURI;
   var query = new URLSearchParams(location.search);
   var cdn = query.has('cdn') ? query.get('cdn') : CDN_BASE;
   globalThis.RXC_CDN = cdn ? new URL(cdn.endsWith('/') ? cdn : cdn + '/', location.href).href : '';
   if (typeof ReadableStream !== 'function' || typeof Response !== 'function') return;
-  var original = globalThis.fetch.bind(globalThis);
+  const assetFetch = globalThis.fetch.bind(globalThis);
+  const downloaded = new Map();
+  const cachePromise = Promise.resolve().then(() => globalThis.caches?.open('ninah-download-v1')).catch(() => null);
+  const original = async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input, document.baseURI).href;
+    if (!downloaded.has(url)) return assetFetch(input, init);
+    const blob = downloaded.get(url);
+    if (blob) return new Response(blob);
+    const response = await (await cachePromise).match(url);
+    if (!response) throw new Error('Downloaded asset was evicted. Reload to download it again.');
+    return response;
+  };
+  globalThis.rxcDownloadGame = async (gameBase, progress) => {
+    const base = new URL(gameBase, document.baseURI);
+    if (!base.pathname.endsWith('/')) base.pathname += '/';
+    const manifestUrl = new URL('manifest.json', base).href;
+    const manifest = await assetFetch(manifestUrl, { cache: 'no-cache' });
+    if (!manifest.ok) throw new Error('Cannot load game manifest (HTTP ' + manifest.status + ')');
+    const manifestBlob = await manifest.blob();
+    const { files, chunk, vers } = JSON.parse(await manifestBlob.text());
+    if (!files || !Number.isSafeInteger(chunk) || chunk <= 0) throw new Error('Invalid game manifest');
+    downloaded.set(manifestUrl, manifestBlob);
+    const items = [];
+    const partSize = 12 * 1024 * 1024;
+    for (const [name, cfg] of Object.entries(SPLIT)) {
+      for (let i = 0; i < cfg.parts; i++) {
+        const file = name + '.part' + String(i + 1).padStart(cfg.pad, '0');
+        items.push([new URL(file, document.baseURI).href, Math.min(partSize, cfg.size - i * partSize)]);
+      }
+    }
+    for (const [path, size] of Object.entries(files)) {
+      // The pack manifest includes these binaries for existence checks. Their code is already in the runtime.
+      if (/\.(dll|exe|rne)$/i.test(path)) continue;
+      const encoded = path.split('\\').map(encodeURIComponent).join('/');
+      const version = vers?.[path] ? '?v=' + vers[path] : '';
+      for (let offset = 0; offset < size; offset += chunk) {
+        items.push([new URL('game/' + encoded + '.' + (offset / chunk) + version, base).href, Math.min(chunk, size - offset)]);
+      }
+    }
+    const cache = await cachePromise;
+    const total = items.reduce((sum, [, size]) => sum + size, 0);
+    let next = 0, loaded = 0, failure;
+    progress(0, total);
+    const download = async () => {
+      while (!failure && next < items.length) {
+        const [url, size] = items[next++];
+        try {
+          const cached = await cache?.match(url);
+          let blob = await cached?.blob();
+          if (blob?.size !== size) {
+            for (let attempt = 0; ; attempt++) {
+              try {
+                const response = await assetFetch(url);
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                blob = await response.blob();
+                if (blob.size !== size) throw new Error('Incomplete download');
+                break;
+              } catch (error) {
+                if (attempt === 2) throw error;
+                await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+              }
+            }
+            if (cache) await cache.put(url, new Response(blob));
+          }
+          downloaded.set(url, cache ? null : blob);
+          loaded += size;
+          progress(loaded, total);
+        } catch (error) {
+          failure = new Error(new URL(url).pathname.split('/').pop() + ': ' + error.message);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 16 }, download));
+    if (failure) throw failure;
+  };
   function target(input) {
     var url;
     try { url = new URL(input instanceof Request ? input.url : String(input), document.baseURI); } catch (e) { return null; }
@@ -507,7 +583,7 @@ const PORT_ENV = {};
 
   // ---- start
   const bar = $('bar').firstElementChild;
-  let gameDataComplete = false;
+
   $('play').onclick = async () => {
     if (started) return; started = true;
     if (autoCapture && navigator.userActivation?.isActive) {
@@ -515,9 +591,37 @@ const PORT_ENV = {};
       mouseX = r.width / 2; mouseY = r.height / 2;
       grab();
     }
-    startupLogStart = performance.now(); startupLogActive = true; startupLog.classList.add('show'); startupLog.textContent = '[0.0s] Starting…\n';
-    $('play').disabled = true; status('Loading engine…'); bar.parentElement.classList.add('indeterminate');
-    const t0 = performance.now();
+    startupLogStart = performance.now(); startupLogActive = true;
+    $('play').disabled = true;
+    $('overlay').classList.remove('startup-error');
+    status('Preparing download…');
+    bar.parentElement.classList.add('indeterminate');
+    const clock = $('elapsed');
+    const showElapsed = () => {
+      const seconds = Math.floor((performance.now() - startupLogStart) / 1000);
+      clock.textContent = 'Elapsed ' + Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    };
+    showElapsed();
+    const timer = setInterval(showElapsed, 1000);
+    try {
+      await rxcDownloadGame(q.get('base') || GAME_BASE, (loaded, total) => {
+        const percent = total ? Math.floor(100 * loaded / total) : 100;
+        bar.parentElement.classList.remove('indeterminate');
+        bar.style.width = percent + '%';
+        $('status').textContent = 'Downloading ' + percent + '% · ' + Math.round(loaded / 1048576) + ' / ' + Math.round(total / 1048576) + ' MiB';
+      });
+    } catch (error) {
+      startupError();
+      status('Download failed. ' + error.message);
+      $('play').textContent = 'Retry';
+      $('play').disabled = false;
+      started = false;
+      return;
+    } finally {
+      clearInterval(timer);
+      showElapsed();
+    }
+    status('Download complete · Starting game…');
     M = {
       canvas: view, arguments: [launchArgs()], yieldMode: PACE[pace][1], fpsCap: +(q.get('fps') || 60),
       // ?mt=N: N guest threads get a host thread of their own (0 = the threaded module, still cooperative)
@@ -526,17 +630,6 @@ const PORT_ENV = {};
       preRun: [m => { m.ENV.REXCOMP_MT = q.get('mt') || '0'; m.ENV.REXCOMP_SCREEN = res.join('x'); Object.assign(m.ENV, PORT_ENV); for (const k in env) m.ENV[k] = env[k]; }],   // debug switches, e.g. ?REXCOMP_INPUT=...
       print: s => { console.log(s); if (globalThis.__rxcSink) globalThis.__rxcSink.push(s); },
       printErr: s => { console.error(s); if (globalThis.__rxcSink) globalThis.__rxcSink.push(s); },
-      onDownloadProgress: (loaded, total) => {
-        gameDataComplete = loaded === total;
-        bar.parentElement.classList.remove('indeterminate');
-        bar.style.width = (100 * loaded / total).toFixed(1) + '%';
-        status(`Executable image ${Math.floor(100 * loaded / total)}% (${(loaded / 1048576).toFixed(0)} / ${(total / 1048576).toFixed(0)} MB)`);
-      },
-      onStatus: s => {
-        if (gameDataComplete && /^starting/i.test(s)) { status('Executable image 100% downloaded · Starting game…'); return; }
-        if (!gameDataComplete) bar.parentElement.classList.add('indeterminate');
-        status(s);
-      },
       onFirstFrame: () => { flushStartupLog(); startupLogActive = false; bar.parentElement.classList.remove('indeterminate'); bar.style.width = '100%'; $('overlay').classList.add('hidden'); showCursor(); $('hint').classList.add('show'); setTimeout(() => $('hint').classList.remove('show'), 5000); canvas.focus(); },
     };
     const useWorker = q.get('gfxworker') !== '0' && !!view.transferControlToOffscreen;
