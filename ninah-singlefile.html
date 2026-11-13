@@ -116,7 +116,7 @@ document.head.append(assetBase);
 // ?mt=1 loads the threaded module (rexcomp_mt.js, built with build.py web --threads) instead of the cooperative one.
 // It is a separate wasm module, so switching back is just dropping the flag.
 (function () {
-  var RETRY = [403, 429, 500, 502, 503, 504], original = globalThis.fetch.bind(globalThis), tried = new Set();
+  var RETRY = [0, 403, 429, 500, 502, 503, 504], original = globalThis.fetch.bind(globalThis), tried = new Set();
   function mirrorsOf(url) {
     var u; try { u = new URL(url); } catch (e) { return []; }
     var m = /^\/gh\/([^/]+)\/([^@/]+)@([^/]+)\/(.+)$/.exec(u.pathname);
@@ -227,17 +227,26 @@ document.head.append(assetBase);
 })();
 
 const rxcMt = new URLSearchParams(location.search).has('mt') ? '_mt' : '';
-document.write('<scr' + 'ipt src="launch.js"></scr' + 'ipt>');
-document.write('<scr' + 'ipt>if (window.REXCOMP_LAUNCH?.env?.REXCOMP_DIRECT_START === "1") document.documentElement.classList.add("rxc-direct");</scr' + 'ipt>');
-document.write('<scr' + 'ipt src="modules' + rxcMt + '.js"></scr' + 'ipt>');
-document.write('<scr' + 'ipt src="rexcomp' + rxcMt + '.js"></scr' + 'ipt>');
+async function loadStartupScripts() {
+  const scripts = await Promise.all(['launch.js', 'modules' + rxcMt + '.js', 'rexcomp' + rxcMt + '.js'].map(async name => {
+    const url = new URL(name, document.baseURI).href;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Cannot load ' + name + ' (HTTP ' + response.status + ')');
+    return (await response.text()) + '\n//# sourceURL=' + url;
+  }));
+  for (const source of scripts) {
+    const script = document.createElement('script');
+    script.textContent = source;
+    document.head.append(script);
+    script.remove();
+  }
+  if (window.REXCOMP_LAUNCH?.env?.REXCOMP_DIRECT_START === "1") document.documentElement.classList.add("rxc-direct");
+}
 </script>
 <script>
-// where the game data (manifest.json + game/) is served from: '' = next to this page, or a CDN base such as
-// 'https://cdn.jsdelivr.net/gh/<user>/<repo>@<tag>/' (build.py pack writes the chunked tree)
 const GAME_BASE = document.baseURI;
 const PORT_ENV = {};
-(() => {
+(async () => {
   const $ = id => document.getElementById(id);
   const canvas = $('canvas'), view = $('view'), statusEl = $('status');
   const startupLog = $('startup-log'); let startupLogActive = false, startupLogStart = 0, startupPending = '', startupTimer = 0, lastStartupStatus = '';
@@ -283,6 +292,14 @@ const PORT_ENV = {};
   let M = null, started = false, skipClosePrompt = false, confirmClose = true;
   addEventListener('beforeunload', e => { if (started && confirmClose && !skipClosePrompt) { e.preventDefault(); e.returnValue = ''; } });
   $('bclose').onclick = () => { confirmClose = !confirmClose; $('bclose').textContent = 'Confirm close: ' + (confirmClose ? 'on' : 'off'); };
+  try {
+    await loadStartupScripts();
+  } catch (error) {
+    startupError();
+    status(error.message);
+    console.error('[rexcomp]', error);
+    return;
+  }
   const q = new URLSearchParams(location.search), launch = window.REXCOMP_LAUNCH || {};
   const env = Object.assign({}, launch.env || {}); for (const [k, v] of q) if (k.startsWith('REXCOMP_')) env[k] = v;
   // Browser launch arguments and runtime settings.
