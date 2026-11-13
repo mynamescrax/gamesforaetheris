@@ -1,9 +1,0 @@
-# Raw files from the Rexcomp pack: GitHub refuses files over 100 MB and jsDelivr
-# over 20 MB, so the deployed copy keeps these split into *.partNN (12 MiB) and
-# never commits the originals. The .br sidecars and obj*/ trees are build output.
-/rexcomp.wasm
-/image.bin
-/*.br
-/obj/
-/obj_*/
-/link_objects.rsp

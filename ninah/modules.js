@@ -1,1 +1,0 @@
-window.REXCOMP_SIDE_MODULES = [];
